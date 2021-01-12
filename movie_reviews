@@ -1,0 +1,282 @@
+
+Analysis Conclusion
+The analysis consists of the sentiment analysis and text mining of the rotten tomatoes movies dataset. 
+The dataset includes positive sentiments and negative sentiments in the form of two different files which were bonded to one. 
+Naive Bayes classifier algorithm has been used for the analysis which has a prediction accuracy of 76.67% and the Lexi coder sentiment analysis the model
+has attained an accuracy of around 90%.
+The most used words are Film and Movie from the analysis and the other mostly used words are comedy, funny, best, love life and others.
+
+
+install.packages("quanteda")
+install.packages("readtext")
+install.packages("devtools")
+devtools::install_github("quanteda/quanteda.corpora")
+install.packages("spacyr")
+install.packages("newsmap")
+install.packages("TDMR")
+library(quanteda)
+require(quanteda.corpora)
+require(newsmap)
+library(tm)
+library(TDMR)
+library(SnowballC)
+library(readtext)
+library(jsonlite)
+library(tmap)
+library(wordcloud)
+library(plotrix)
+library(dplyr)
+library(qdap)
+library(ggplot2)
+
+#set a data path
+DATA_PATH <- system.file("extdata/", package = "readtext")
+DATA_PATH
+#read the text of the file
+polarity_data<-readtext(paste0(DATA_PATH, "/txt/rt_polaritydata/*"))
+polarity_data
+rottentomatoes_data<-readtext(paste0(DATA_PATH, "/txt/rt_polaritydata/*.txt"),
+                              docvarsfrom = "filenames", 
+                              docvarnames = c("source", "context", "sentiment"),
+                              dvsep = "_", 
+                              encoding = "ISO-8859-1")
+
+URL = "http://www.cs.cornell.edu/people/pabo/movie-review-data/rt-polaritydata.tar.gz"
+
+download.file(URL, "rt-polaritydata.tar.gz")
+#unzip the file
+untar("rt-polaritydata.tar.gz")
+
+#store the negative reviews in one data frame
+df_neg <- data.frame(sentence = readLines("./rt-polaritydata/rt-polarity.neg"), 
+                     stringsAsFactors = FALSE)
+View(df_neg)
+#add a column sentiment and assign values as neg to all negative comments
+df_neg['sentiment'] <- "neg"
+
+#store the positive reviews in one data frame
+df_pos <- data.frame(sentence = readLines("./rt-polaritydata/rt-polarity.pos"), 
+                     stringsAsFactors = FALSE)
+#add a column sentiment and assign values as pos to all positive comments
+df_pos['sentiment'] <- "pos"
+
+View(df_pos)
+
+#bind both the data frames 
+corp_movies <- corpus(rbind(df_neg, df_pos), text_field='sentence')
+
+summary(corp_movies,2)
+ndoc(corp_movies)
+
+#function to clean the corpus object using tm_map library
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, stripWhitespace)
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  corpus <- tm_map(corpus, removeWords, stopwords("en"))
+  corpus <- tm_map(corpus, removeNumbers)
+  return(corpus)
+}
+#grouping of texts in the data
+corp_movies_source <- VectorSource(corp_movies)
+
+#creating a volatile corpus
+corp_movies_corpus <- VCorpus(corp_movies_source)
+
+#cleaning the corpus using the tm_map created function
+corp_movies_clean <- clean_corpus(corp_movies_corpus)
+
+#Tokenization of the corpus
+toks <- tokens(corp_movies)
+#tokenization removing the english stop words
+toks_nostop <- tokens_select(toks, pattern = stopwords("english"), selection = 'remove')
+#Frequency of terms of the random 15 words removing the top200 stop words 
+term_count <- freq_terms(toks_nostop, 15,stopwords = Top200Words)
+plot(term_count)
+
+ 
+
+#Frequency of terms of the random 50 words removing the top200 words
+frequency <- freq_terms(corp_movies, 
+                        top = 50, 
+                        stopwords =Top200Words
+)
+plot(frequency)
+ 
+
+#converting the corpus to a dataframe 
+corp_movies_df <- as.matrix(corp_movies)
+
+#Create Term Document Matrix
+corp_movies_tdm <- TermDocumentMatrix(corp_movies_clean)
+#Converting TDM to matrix for Analysis
+corp_movies_m <- as.matrix(corp_movies_tdm)
+corp_movies_freq <- rowSums(corp_movies_m)
+
+corp_movies_word_freq <- data.frame(
+  term = names(corp_movies_freq),
+  num = corp_movies_freq
+)
+#creation of wordcloud using 
+wordcloud(corp_movies_word_freq$term, corp_movies_word_freq$num,
+          max.words = 50, colors =c("grey80","blueviolet","tomato"))
+ 
+View(corp_movies_m)
+
+
+#Plot of the word vs frequency 
+term_count %>%
+  ggplot( aes(x=WORD, y=FREQ)) +
+  geom_segment( aes(x= reorder(WORD,desc(FREQ)), xend=WORD, y=0, yend=FREQ),                           color="skyblue", size=1) +
+  geom_point(color="blue", size=4, alpha=0.6) +
+  theme_minimal()+
+  theme(text = element_text(size = 10),
+        plot.title = element_text(size = 16,color = "#ff5a5f", face = "bold",margin                                   = margin(b = 7)),
+        plot.subtitle = element_text(size = 10, color = "darkslategrey", margin =                                       margin(b = 7))) +
+  xlab("Word") +
+  ylab("Frequency")
+ 
+
+#loading some additional libraries for text mining
+library(tidytext)
+library(textdata)
+
+library(textmining)
+
+#get sentiments of a single lexicon 
+nrc <- get_sentiments("nrc")
+glimpse(nrc)
+
+term_frequency <- rowSums(corp_movies_m)
+View(term_frequency)
+glimpse(temp_table)
+temp_table <- data.frame(word=names(corp_movies_freq),word_count = corp_movies_freq)%>%
+  inner_join(nrc)
+#removing the duplicates in the data
+temp_table_new<-temp_table[!duplicated(temp_table$word),]
+
+#plot of the sentiments 
+temp_table_new %>% 
+  group_by(sentiment) %>%
+  top_n(15, word_count) %>%
+  ungroup() %>%
+  mutate(word = reorder(word,word_count)) %>%
+  ggplot(aes(x = word, 
+             y = word_count, fill = sentiment)) +
+  geom_col() +
+  facet_wrap(~sentiment, scales = "free")+
+  coord_flip() +
+  theme(axis.text.y = element_text(size = 7), 
+        axis.text.x = element_text(size = 5)) 
+ 
+
+
+
+corp_movies_v <- tokens(corp_movies, remove_punct = TRUE) %>% as.character()
+
+corp_movies_dfm <- dfm(corp_movies, remove_punct = TRUE,remove = stopwords("english"))
+head(corp_movies_v, nf = 10)
+
+#frequency of the words in the document feature matrix
+textstat_frequency(corp_movies_dfm, n = 20) 
+
+#Simple frequency plot of the rank of the words and the frequency 
+theme_set(theme_minimal())
+textstat_frequency(corp_movies_dfm, n = 50) %>% 
+  ggplot(aes(x = rank, y = frequency)) +
+  geom_point() +
+  labs(x = "Frequency rank", y = "Term frequency")
+ 
+
+
+
+corp_movies_tdm2 <- removeSparseTerms(corp_movies_tdm, sparse = 0.975)
+
+hc <- hclust(d = dist(corp_movies_tdm2, method = "euclidean"))
+
+# Plot a dendrogram
+plot(hc)
+ 
+
+#top features of the document feature matrix
+topfeatures(corp_movies_dfm)
+# weights of document feature matrix with the proportion of the feature counts as of the  total feature counts
+corp_movies_prop <- dfm_weight(corp_movies_dfm, scheme  = "prop")
+print(corp_movies_prop)
+#Weight a dfm by term frequency-inverse document frequency
+corp_movies_tfidf <- dfm_tfidf(corp_movies_dfm)
+print(corp_movies_tfidf)
+
+#Lexical Diversity
+tstat_lexdiv <- textstat_lexdiv(toks)
+#plot of lexical diversity
+plot(tstat_lexdiv$TTR, type = 'l', xaxt = 'n', xlab = NULL, ylab = "TTR")
+grid()
+axis(1, at = seq_len(nrow(tstat_lexdiv)))
+ 
+
+#Document similarity
+tstat_dist <- as.dist(textstat_dist(corp_movies_dfm))
+clust <- hclust(tstat_dist)
+plot(clust, xlab = "Distance", ylab = NULL)
+
+#sentiment of tokens Lexicoder Sentiment Dictionary 
+corp_movies_lookup<-tokens_lookup(toks_nostop, dictionary = data_dictionary_LSD2015,exclusive = TRUE)
+
+corp_movies_lookup<-tokens_lookup(tokens(corp_movies), dictionary = data_dictionary_LSD2015,exclusive = FALSE, nested_scope = "dictionary")
+corp_lookip<-dfm(corp_movies_lookup)
+glimpse(corp_movies_lookup)
+
+#importing some additional packages
+library(caret)
+install.packages("quanteda.textmodels")
+library(quanteda.textmodels)
+
+#Match the feature set of a dfm lookup to a original dfm of feature names
+corp_lookup_dfmat_matched <- dfm_match(corp_lookip, features = featnames(corp_movies_dfm))
+actual_class_lookup <- corp_lookup_dfmat_matched$sentiment
+
+#Naives Bayes using textmodel_nb
+tmod_lookup_nb <- textmodel_nb(corp_movies_dfm, corp_movies_dfm$sentiment)
+predicted_class_lookup <- predict(tmod_lookup_nb, newdata = corp_lookup_dfmat_matched)
+tab_class_lookup <- table(actual_class_lookup, predicted_class_lookup)
+tab_class_lookup
+
+
+#accuracy,precision,recall and F1 measure
+confusionMatrix(tab_class_lookup, mode = "everything")
+ 
+
+#splitting the data set in 70% train and 30% test dataset
+summary(corp_movies, 5)
+#setting a seed value of 300
+set.seed(300)
+id_train <- sample(1:10662, 7464, replace = FALSE)
+head(id_train, 10)
+corp_movies$id_numeric <- 1:ndoc(corp_movies)
+
+#creating training dataset
+dfmat_training <- corpus_subset(corp_movies, id_numeric %in% id_train) %>%
+  dfm(remove = stopwords("english"), stem = TRUE)
+#creating the test dataset
+dfmat_test <- corpus_subset(corp_movies, !id_numeric %in% id_train) %>%
+   dfm(remove = stopwords("english"), stem = TRUE)
+
+#Naive Bayes classifier
+tmod_nb <- textmodel_nb(dfmat_training, dfmat_training$sentiment)
+dfmat_matched <- dfm_match(dfmat_test, features = featnames(dfmat_training))
+actual_class <- dfmat_matched$sentiment
+#predicted class
+predicted_class <- predict(tmod_nb, newdata = dfmat_matched)
+
+tab_class <- table(actual_class, predicted_class)
+tab_class  
+
+
+#Confusion matrix of acurracy, precision, recall and F1
+confusionMatrix(tab_class, mode = "everything")
+ 
+summary(tmod_nb)
+
+
+
